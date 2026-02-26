@@ -1,0 +1,58 @@
+name: Build and Deploy to Kubernetes
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: order-api
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # 1️⃣ Checkout del código
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Login a GitHub Container Registry
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 3️⃣ Build de la imagen con tag SHA
+      - name: Build Docker image
+        run: |
+          docker build -t ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker tag ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }} ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+
+      # 4️⃣ Push de la imagen
+      - name: Push Docker image
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+
+      # 5️⃣ Configurar kubeconfig desde secret
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > $HOME/.kube/config
+
+      # 6️⃣ Actualizar imagen en el deployment
+      - name: Set image in Kubernetes
+        run: |
+          kubectl set image deployment/order-api order-api=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -n default
+
+      # 7️⃣ Esperar rollout
+      - name: Verify rollout
+        run: |
+          kubectl rollout status deployment/order-api -n default
